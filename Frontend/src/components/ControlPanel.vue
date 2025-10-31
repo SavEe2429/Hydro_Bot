@@ -44,7 +44,7 @@ export default {
   name: 'ControlPanel',
   data() {
     return {
-      backendBaseUrl: 'https://your-backend-service.onrender.com', 
+      backendBaseUrl: 'https://hydro-bot-7827.onrender.com', 
       isLoading: false,
       imageUrl: '', 
       objectCount: 0, 
