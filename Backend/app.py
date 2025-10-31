@@ -1,17 +1,16 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS  # ⬅️ นำเข้า CORS
 import requests
 import os
-# from dotenv import load_dotenv
-
-# load_dotenv() # ถ้ามีการใช้ไฟล์ .env ในอนาคต
 
 app = Flask(__name__)
 
-# 🚨 กำหนด URL ของโปรแกรม Local Listener (ที่รันบนแล็ปท็อป/Pi)
-# ⚠️ ต้องเปลี่ยนเป็น IP Address และ Port ที่ถูกต้องของเครื่อง Local ของคุณ
-#    (เช่น ถ้าคุณรัน Local Listener บนเครื่องตัวเองที่ Port 5001)
-LOCAL_DEVICE_URL = "https://savee2429.site/" 
-# ในสภาพแวดล้อมจริง Render จะต้องเข้าถึง IP สาธารณะ (Public IP) หรือ tunneling service (เช่น ngrok)
+# 🎯 กำหนดค่า CORS: อนุญาตเฉพาะ Origin ที่แน่นอน
+CORS(app, resources={r"/api/*": {"origins": "https://savee2429.github.io"}}) 
+# Note: r"/api/*" คือการบอกว่าให้ใช้กฎนี้กับทุก Endpoint ที่ขึ้นต้นด้วย /api/
+
+# 🚨 ดึง URL ของ Local Device (Cloudflare Tunnel URL) จาก Environment Variable
+LOCAL_DEVICE_URL = os.environ.get("LOCAL_DEVICE_URL")
 
 # --- Endpoints สำหรับการควบคุม ---
 
