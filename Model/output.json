@@ -1,0 +1,22 @@
+{
+    "camera_center": [
+        320,
+        240
+    ],
+    "objects": [
+        {
+            "object_id": 0,
+            "object_center": [
+                140,
+                314
+            ]
+        },
+        {
+            "object_id": 1,
+            "object_center": [
+                481,
+                344
+            ]
+        }
+    ]
+}
