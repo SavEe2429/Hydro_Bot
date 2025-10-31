@@ -7,7 +7,7 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 // https://vite.dev/config/
 export default defineConfig({
   // 🎯 ตำแหน่งที่ต้องเพิ่ม: พร็อพเพอร์ตี้ 'base'
-  base: '/Hydro-Bot/', // <--- เพิ่มบรรทัดนี้!
+  base: '/Hydro_Bot/', // <--- เพิ่มบรรทัดนี้!
   plugins: [
     vue(),
     vueDevTools(),
