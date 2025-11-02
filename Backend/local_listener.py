@@ -1,54 +1,53 @@
 from flask import Flask, request, jsonify
-import cv2
-import os
+import os , sys
 import requests # เพื่อส่งผลลัพธ์กลับไปที่ Cloud
 # import serial # 🚨 สำหรับ Serial Port Control
 # from your_ai_script import run_ai_detection # 🚨 นำเข้าฟังก์ชัน AI/Stitching
 import numpy as np # (ใช้สำหรับตัวอย่าง AI Logic)
 # ⚠️ โค้ดนี้ต้องการการติดตั้ง Library Python ทั้งหมด: opencv-python, ultralytics, pyserial
+import serial_control as sc
+import base64
+sys.path.append(os.path.join(os.path.dirname(__file__),'..','Model'))
+import merge
 
 app = Flask(__name__)
 # URL สำหรับส่งผลลัพธ์กลับไปที่ Cloud Storage/Render (ถ้ามี)
 # CLOUD_STORAGE_URL = "http://your-cloud-storage-endpoint.com/upload" 
 
+sc.initialize_serial_connection()
+
+def image_to_base64(filepath):
+    """แปลงไฟล์ภาพให้เป็น Base64 String พร้อม MIME type"""
+    try:
+        with open(filepath, "rb") as image_file:
+            encoded_string = base64.b64encode(image_file.read()).decode('utf-8')
+        # คืนค่าเป็น Data URI
+        return f"data:image/jpeg;base64,{encoded_string}"
+    except Exception as e:
+        print(f"Error encoding image: {e}")
+        return ""
+
 # 🚨 Placeholder: นี่คือฟังก์ชันที่รวมโค้ด AI/Stitching/Sorting ของคุณไว้
 def process_and_detect_ai():
-    # -----------------------------------------------------------
-    # 1. CAMERA / STITCHING (โค้ดส่วนแรกที่คุณส่งมา)
-    # -----------------------------------------------------------
-    
-    # 📸 โค้ดถ่ายภาพหลาย shot และ Stitching ของคุณ
-    # ... (โค้ด cv2.VideoCapture(0), cap.read(), cv2.Stitcher_create, stitcher.stitch) ...
-    
-    # สมมติว่าได้ภาพ stitched และบันทึกไปที่ 'img_detection/stitched.jpg'
-    stitched_img_path = "img_detection/stitched.jpg" 
-
-    # -----------------------------------------------------------
-    # 2. YOLO DETECTION / SORTING (โค้ดส่วนที่สองที่คุณส่งมา)
-    # -----------------------------------------------------------
-    
-    # 🧠 โค้ด YOLO detection, คำนวณ Center, และ Zig-Zag Sorting
-    # ... (โค้ด model = YOLO("Model/best.pt"), boxes, centers, rows, sorted_indices) ...
-    
-    # -----------------------------------------------------------
-    # 3. Serial Port Command Data Generation
-    # -----------------------------------------------------------
-    
-    # 🚨 สร้าง Data สำหรับส่งกลับ (รวมถึงข้อมูลที่จำเป็นสำหรับการควบคุม Serial Port)
+    # # 🚨 สร้าง Data สำหรับส่งกลับ (รวมถึงข้อมูลที่จำเป็นสำหรับการควบคุม Serial Port)
     object_count = 5 # สมมติว่าเจอ 5 จุด
+    merge.capture()
     
-    # 🚨 ในการใช้งานจริง โค้ดต้อง Upload 'stitched.jpg' ไปที่ Cloud Storage 
-    #    และคืน URL สาธารณะกลับมาให้ Frontend (Vue.js) แสดงผล
-    image_display_url = "https://example.com/your-uploaded-image.jpg"
-    
-    # 🚨 Data ที่จำเป็นสำหรับการควบคุม Serial Port (เช่น ลำดับการรดน้ำ) ควรถูกเก็บไว้ที่นี่
-    object_order = [3, 1, 4, 2, 5] # สมมติว่าได้ลำดับนี้จากการจัดเรียง Zig-Zag
+    # # 🚨 ในการใช้งานจริง โค้ดต้อง Upload 'stitched.jpg' ไปที่ Cloud Storage 
+    # #    และคืน URL สาธารณะกลับมาให้ Frontend (Vue.js) แสดงผล
+    # # image_display_url = "https://images4.alphacoders.com/133/thumb-1920-1332281.jpeg"
+    stitched_img_path = "Model/img_detection/detected.jpg"
+    # # image_display_url = "./Model/captured_shots/shot_1.jpg"
+    image_base64_data = image_to_base64(stitched_img_path)
+    # # 🚨 Data ที่จำเป็นสำหรับการควบคุม Serial Port (เช่น ลำดับการรดน้ำ) ควรถูกเก็บไว้ที่นี่
+    # # object_order = [3, 1, 4, 2, 5] # สมมติว่าได้ลำดับนี้จากการจัดเรียง Zig-Zag
     
     return {
-        "image_url": image_display_url,
+        "image_url": image_base64_data,
         "object_count": object_count,
-        "object_order": object_order # ข้อมูลนี้จะถูกใช้โดย Endpoints water_specific/water_all
+        # "object_order": object_order # ข้อมูลนี้จะถูกใช้โดย Endpoints water_specific/water_all
     }
+
 
 
 # --- Endpoints สำหรับ Local Listener (รับคำสั่งจาก Render) ---

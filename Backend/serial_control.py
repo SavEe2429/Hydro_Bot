@@ -1,0 +1,176 @@
+# -*- coding: utf-8 -*-
+import serial , time, os , sys
+from serial.tools import list_ports
+
+# ----------------------------------------------------
+# 1. การตั้งค่า PORT และ Global Variable
+# ----------------------------------------------------
+
+# ⚠️ ดึงชื่อ Serial Port จาก Environment Variable ที่ตั้งไว้ใน Terminal
+SERIAL_PORT_NAME = os.environ.get("SERIAL_PORT")
+BAUD_RATE = 115200  # Baud Rate ที่ตรงกับ Arduino/ESP32 (คุณเปลี่ยนเป็น 115200 แล้ว)
+ser = None  # ตัวแปรสำหรับเก็บ Serial Connection
+
+
+def find_available_ports():
+    """ค้นหาและแสดงรายการ Serial Port ที่ใช้งานได้ทั้งหมด"""
+    ports = list_ports.comports()
+    # ... (โค้ดส่วนนี้คงเดิม)
+    if not ports:
+        print("💡 ไม่พบ Serial Port ใดๆ ในระบบ")
+        return []
+
+    print("\n--- Serial Ports ที่ตรวจพบ ---")
+    available_ports = []
+    for port in ports:
+        print(f"  - PORT: {port.device} | DESCRIPTION: {port.description}")
+        available_ports.append(port.device)
+    print("------------------------------")
+    return available_ports
+
+
+def initialize_serial_connection():
+    """เริ่มต้นการเชื่อมต่อ Serial Port"""
+    global ser
+    # ⚠️ แทนที่ COM4 ด้วย PORT ที่คุณต้องการใช้ทดสอบจริง (COM4 ในกรณีของคุณ)
+    os.environ["SERIAL_PORT"] = "COM4"
+
+    # ดึงค่า SERIAL_PORT_NAME ใหม่จาก Environment ที่เพิ่งตั้ง
+    SERIAL_PORT_NAME = os.environ.get("SERIAL_PORT")
+
+    # 1. ตรวจสอบว่ามีการกำหนดชื่อ PORT หรือไม่
+    if not SERIAL_PORT_NAME:
+        print(
+            "❌ ERROR: กรุณากำหนด SERIAL_PORT Environment Variable (เช่น set SERIAL_PORT=COM3)"
+        )
+        find_available_ports()
+        return False
+
+    # 2. ตรวจสอบว่ามีการเชื่อมต่ออยู่แล้วหรือไม่
+    if ser and ser.is_open:
+        print(f"✅ Connection to {SERIAL_PORT_NAME} already open.")
+        return True
+
+    # 3. ลองเชื่อมต่อ
+    try:
+        print(f"🔄 Attempting to connect to {SERIAL_PORT_NAME} at {BAUD_RATE}...")
+        ser = serial.Serial(SERIAL_PORT_NAME, BAUD_RATE, timeout=1)
+        time.sleep(2)  # ให้เวลา Arduino/ESP32 รีเซ็ต
+        print(f"✅ Successfully connected to {SERIAL_PORT_NAME}")
+        return True
+    except serial.SerialException as e:
+        print(f"❌ ERROR: Cannot open serial port {SERIAL_PORT_NAME}. Error: {e}")
+        find_available_ports()
+        return False
+
+
+def send_serial_command(command: str) -> str:
+    """
+    ส่งคำสั่งไปยัง Arduino/ESP32 และรอรับการตอบกลับ
+    :param command: ข้อความคำสั่งที่ต้องการส่ง (เช่น 'WATER_ALL', 'WATER_ZONE:A')
+    :return: ข้อความตอบกลับจากอุปกรณ์
+    """
+    # ... (โค้ดส่วนนี้คงเดิม)
+    if not initialize_serial_connection():
+        return "ERROR: Serial Connection Failed."
+
+    try:
+        # 1. Encode คำสั่งเป็น bytes และส่ง
+        command_bytes = (command + "\n").encode("utf-8")
+        ser.write(command_bytes)
+        print(f"-> Sent command: {command}")
+
+        # 2. รอรับการตอบกลับ (Response)
+        time.sleep(0.1)
+
+        response = receive_multi_line_report()
+        print(f"<- Received response: {response}")
+
+        if response:
+            return response
+        else:
+            return "TIMEOUT: No response from device."
+
+    except Exception as e:
+        print(f"❌ ERROR during serial communication: {e}")
+        return f"FATAL_ERROR: {e}"
+
+
+def close_serial_connection():
+    """ปิดการเชื่อมต่อ Serial Port"""
+    # ... (โค้ดส่วนนี้คงเดิม)
+    global ser
+    if ser and ser.is_open:
+        print(f"🧹 Closing serial connection to {SERIAL_PORT_NAME}...")
+        ser.close()
+        ser = None
+        print("✅ Connection closed.")
+
+
+def receive_multi_line_report() -> str:
+    """
+    รับข้อมูลหลายบรรทัดจาก Serial จนกว่าจะเจอข้อความ 'REPORT_END'
+    """
+    if not ser or not ser.is_open:
+        return "ERROR: Serial Connection Not Ready."
+
+    full_report = ""
+    timeout_counter = 0
+    max_timeout = 50  # 5 วินาที (0.1 * 50)
+
+    while timeout_counter < max_timeout:
+        # 0.1 วินาทีที่รอรับข้อมูลจะช่วยให้ Serial Buffer มีเวลาส่งข้อมูลมา
+        time.sleep(0.1)
+
+        # 1. อ่านบรรทัด
+        if ser.in_waiting > 0:
+            response_line = ser.readline().decode("utf-8").strip()
+
+            if response_line == "REPORT_END":
+                return full_report
+
+            full_report += response_line + "\n"
+            timeout_counter = 0  # รีเซ็ต timeout เมื่อได้รับข้อมูล
+        else:
+            timeout_counter += 1
+
+    return f"ERROR: TIMEOUT after reading partial report:\n{full_report}"
+
+
+# ----------------------------------------------------
+# ฟังก์ชันสำหรับการทดสอบ (สามารถรันแยกเพื่อทดสอบ Serial ได้)
+# ----------------------------------------------------
+if __name__ == "__main__":
+    # 🎯 FIX: กำหนดค่า SERIAL_PORT เป็น Environment Variable ชั่วคราว
+    #        เพื่อให้โค้ดส่วนบน (initialize_serial_connection) สามารถอ่านได้
+
+    # ⚠️ แทนที่ COM4 ด้วย PORT ที่คุณต้องการใช้ทดสอบจริง (COM4 ในกรณีของคุณ)
+    os.environ["SERIAL_PORT"] = "COM4"
+
+    # ดึงค่า SERIAL_PORT_NAME ใหม่จาก Environment ที่เพิ่งตั้ง
+    SERIAL_PORT_NAME = os.environ.get("SERIAL_PORT")
+
+    find_available_ports()
+
+    if initialize_serial_connection():
+
+        user_input = ""
+        print("\n--- Starting Continuous Serial Test ---")
+
+        # 🎯 โครงสร้างการวนลูปที่ถูกต้องตามหลักการ Python
+        while user_input != "0":
+            user_input = input()
+            # ส่งคำสั่ง 'r' (หรือคำสั่งใดๆ ที่ ESP32 คาดหวัง)
+            send_serial_command(user_input)
+            # response = receive_multi_line_report()
+            # print(f"Test Result: {response}")
+
+            # อัปเดตตัวแปรสำหรับตรวจสอบเงื่อนไข
+            # Note: ต้องมั่นใจว่า ESP32 ส่ง '0' หรือ '1' กลับมา
+            # test_response = response.strip()
+
+            # หยุดลูปชั่วคราวเพื่อป้องกันการรันที่เร็วเกินไป
+            time.sleep(0.5)
+
+        print("✅ Continuous test stopped because device returned '0'.")
+        close_serial_connection()

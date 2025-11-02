@@ -1,10 +1,12 @@
-import cv2 , os , subprocess , sys
-sys.path.append(os.path.join(os.path.dirname(__file__), '..' , 'Backend'))
-import serial_control as sc
-import detect
+import cv2
+import os
+import subprocess
 
-def capture():
-    save_path = "Model/captured_shots"
+import ../Backend/serial_control
+
+
+def cap_and_detect():
+    save_path = "captured_shots"
     os.makedirs(save_path, exist_ok=True)
 
     cap = cv2.VideoCapture(0)
@@ -25,16 +27,16 @@ def capture():
         if not ret:
             break
 
-        # cv2.imshow("Live", frame)
+        cv2.imshow("Live", frame)
 
         filename = os.path.join(save_path, f"shot_{img_length+1}.jpg")
         cv2.imwrite(filename, frame)
         captured_files.append(filename)
         print(f"📸 บันทึก {filename}")
 
-        # # รอ interval วินาที หรือถ้ากด q จะออกก่อน
-        # if cv2.waitKey(interval * 1000) & 0xFF == ord("q"):
-        #     break
+        # รอ interval วินาที หรือถ้ากด q จะออกก่อน
+        if cv2.waitKey(interval * 1000) & 0xFF == ord("q"):
+            break
 
     cap.release()
     cv2.destroyAllWindows()
@@ -46,9 +48,9 @@ def capture():
     stitcher = cv2.Stitcher_create(cv2.Stitcher_SCANS)  # ใช้โหมด SCANS
     (status, stitched) = stitcher.stitch(images)
 
-    save_path = "Model/stitched/"
+    save_path = "img_detection"
     os.makedirs(save_path, exist_ok=True)
-    img_path = "Model/stitched/stitched.jpg"
+    img_path = "img_detection/stitched.jpg"
 
     if status == cv2.Stitcher_OK:
         cv2.imwrite(img_path, stitched)
@@ -57,7 +59,4 @@ def capture():
         print("❌ Stitching ไม่สำเร็จ, status =", status)
 
     print("file : ", img_path)
-    detect.detect_ai()
-
-if __name__ == '__main__':
-    capture()
+    subprocess.run(["python", "detect.py", img_path])
