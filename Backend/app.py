@@ -6,7 +6,12 @@ import os
 app = Flask(__name__)
 
 # 🎯 กำหนดค่า CORS: อนุญาตเฉพาะ Origin ที่แน่นอน
-CORS(app, resources={r"/api/*": {"origins": "https://savee2429.github.io"}}) 
+# 🎯 FIX: กำหนด Origin ที่ถูกต้องสำหรับ GitHub Pages
+CORS(app, resources={r"/api/*": {
+    "origins": "https://savee2429.github.io", # ⬅️ URL Frontend ของคุณ
+    "methods": ["GET", "POST", "OPTIONS"],
+    "allow_headers": ["Content-Type", "Authorization"]
+}})
 # Note: r"/api/*" คือการบอกว่าให้ใช้กฎนี้กับทุก Endpoint ที่ขึ้นต้นด้วย /api/
 
 # 🚨 ดึง URL ของ Local Device (Cloudflare Tunnel URL) จาก Environment Variable
