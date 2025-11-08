@@ -1,20 +1,27 @@
 from flask import Flask, request, jsonify
-import os , sys
-import requests # เพื่อส่งผลลัพธ์กลับไปที่ Cloud
-# import serial # 🚨 สำหรับ Serial Port Control
-# from your_ai_script import run_ai_detection # 🚨 นำเข้าฟังก์ชัน AI/Stitching
-import numpy as np # (ใช้สำหรับตัวอย่าง AI Logic)
-# ⚠️ โค้ดนี้ต้องการการติดตั้ง Library Python ทั้งหมด: opencv-python, ultralytics, pyserial
+import os , sys , time
+import requests 
+import numpy as np 
 import serial_control as sc
 import base64
+
+# 🎯 FIX: ต้องใส่ path ของ Model เพื่อให้ import ได้
 sys.path.append(os.path.join(os.path.dirname(__file__),'..','Model'))
-import merge
+import merge , detect
 
 app = Flask(__name__)
 # URL สำหรับส่งผลลัพธ์กลับไปที่ Cloud Storage/Render (ถ้ามี)
 # CLOUD_STORAGE_URL = "http://your-cloud-storage-endpoint.com/upload" 
 
-sc.initialize_serial_connection()
+# 🎯 -----------------------------------------------------------------
+# GLOBAL STATE: ใช้เก็บคำสั่งล่าสุดที่มาจาก Web
+# -----------------------------------------------------------------
+LATEST_WEB_COMMAND = {
+    "command": "NONE", 
+    "object_id": None, 
+    "timestamp": 0
+}
+
 
 def image_to_base64(filepath):
     """แปลงไฟล์ภาพให้เป็น Base64 String พร้อม MIME type"""
@@ -27,27 +34,55 @@ def image_to_base64(filepath):
         print(f"Error encoding image: {e}")
         return ""
 
+
 # 🚨 Placeholder: นี่คือฟังก์ชันที่รวมโค้ด AI/Stitching/Sorting ของคุณไว้
 def process_and_detect_ai():
-    # # 🚨 สร้าง Data สำหรับส่งกลับ (รวมถึงข้อมูลที่จำเป็นสำหรับการควบคุม Serial Port)
-    object_count = 5 # สมมติว่าเจอ 5 จุด
-    merge.capture()
+
+    # connecting port
+    sc.initialize_serial_connection()
+
+    # 1. 🟢 Capture:
+    capture_status, files_list = merge.capture_img() # (bool, list[str])
     
-    # # 🚨 ในการใช้งานจริง โค้ดต้อง Upload 'stitched.jpg' ไปที่ Cloud Storage 
-    # #    และคืน URL สาธารณะกลับมาให้ Frontend (Vue.js) แสดงผล
-    # # image_display_url = "https://images4.alphacoders.com/133/thumb-1920-1332281.jpeg"
-    stitched_img_path = "Model/img_detection/detected.jpg"
-    # # image_display_url = "./Model/captured_shots/shot_1.jpg"
-    image_base64_data = image_to_base64(stitched_img_path)
-    # # 🚨 Data ที่จำเป็นสำหรับการควบคุม Serial Port (เช่น ลำดับการรดน้ำ) ควรถูกเก็บไว้ที่นี่
-    # # object_order = [3, 1, 4, 2, 5] # สมมติว่าได้ลำดับนี้จากการจัดเรียง Zig-Zag
+    if not capture_status or not files_list:
+        sc.close_serial_connection()
+        raise Exception("Capture failed. No images were successfully captured or device timed out.")
+        
+    # 2. 🟢 Stitch:
+    # 🎯 FIX: Unpack correctly (stitch_img returns (status, path))
+    stitch_status, stitched_path = merge.stitch_img(files_list) # (bool, str)
     
+    # ถ้า Stitching ล้มเหลว ให้ใช้ภาพที่ได้จาก stitch_img (ซึ่งจะ Fallback ไปใช้ภาพแรก)
+    if not stitch_status:
+        print("❌ Stitching failed. Falling back to the first captured image path provided by merge.py.")
+    
+    if not stitched_path or not os.path.exists(stitched_path):
+         sc.close_serial_connection()
+         raise Exception("Stitching and fallback failed. No valid image path found.")
+
+    # 3. 🟢 Detect AI (YOLO):
+    # 🎯 FIX: detect.detect_ai ถูกปรับให้คืนค่าเป็น Dictionary 
+    detection_results = detect.detect_ai(stitched_path)
+    
+    detect_status = detection_results.get('status', False)
+    detection_img_path = detection_results.get('output_path', stitched_path)
+    object_count = detection_results.get('object_count', 0)
+    
+    if not detect_status:
+        print(f"WARNING: AI Detection reported failure/error. Using image path: {detection_img_path}")
+    
+    # 4. 🟢 Base64 Encode:
+    image_base64_data = image_to_base64(detection_img_path) 
+    
+    # 5. อย่าลืมปิดการเชื่อมต่อเมื่อเสร็จ
+    sc.close_serial_connection()
+
+    # 6. คืนค่าผลลัพธ์ที่รวม object_order ไว้ด้วย
     return {
         "image_url": image_base64_data,
         "object_count": object_count,
-        # "object_order": object_order # ข้อมูลนี้จะถูกใช้โดย Endpoints water_specific/water_all
+        "object_order": detection_results.get('object_order', [])
     }
-
 
 
 # --- Endpoints สำหรับ Local Listener (รับคำสั่งจาก Render) ---
@@ -60,7 +95,8 @@ def local_process_detect():
     print("Local Device: Starting Camera and AI Detection...")
     
     try:
-        results = process_and_detect_ai() # รันโค้ด AI/Camera ของคุณ
+        # 🎯 FIX: รับค่าผลลัพธ์เป็น dictionary
+        results = process_and_detect_ai() 
         
         # 🚨 ในการใช้งานจริง Local Device ควรส่งผลลัพธ์ AI (เช่น ลำดับการรดน้ำ) 
         #    ไปบันทึกในฐานข้อมูล Cloud (เช่น Supabase/Firebase) เพื่อให้ Water API ดึงมาใช้
@@ -68,7 +104,8 @@ def local_process_detect():
         return jsonify({
             "status": "success",
             "image_url": results["image_url"],
-            "object_count": results["object_count"]
+            "object_count": results["object_count"],
+            "object_order": results["object_order"] # คืนค่าลำดับการรดน้ำ
         })
     except Exception as e:
         print(f"AI Processing Error: {e}")
@@ -84,14 +121,14 @@ def local_water_specific():
     object_id = content.get('object_id')
     
     # 🚨 โค้ดควบคุม Serial Port จะอยู่ที่นี่
-    # ser = serial.Serial('/dev/ttyACM0', 9600) # ตัวอย่างการเปิด Serial Port
-    # command = f"W:{object_id}\n"
-    # ser.write(command.encode())
-    # ser.close()
-
-    print(f"Local Device: Serial Command SENT for object ID {object_id}")
+    response = sc.send_serial_command(f"WATER_SPECIFIC:{object_id}")
     
-    return jsonify({"status": "success", "message": f"Serial command sent for {object_id}"})
+    print(f"Local Device: Serial Command SENT for object ID {object_id}. Response: {response}")
+    
+    if "ACK" in response.upper():
+        return jsonify({"status": "success", "message": f"Serial command sent for {object_id}"})
+    else:
+        return jsonify({"status": "error", "message": f"Serial command failed for {object_id}: {response}"}), 500
 
 
 @app.route('/action/water_all', methods=['POST'])
@@ -100,24 +137,20 @@ def local_water_all():
     รับคำสั่งจาก Render Backend ให้รดน้ำทั้งหมดตามลำดับ
     """
     # 🚨 โค้ดนี้ควรดึงลำดับการรดน้ำล่าสุดจากฐานข้อมูล Cloud (ที่ AI บันทึกไว้)
-    #    และทำการวนลูปส่งคำสั่งผ่าน Serial Port
+    #    และทำการวนลูปส่งคำสั่งผ่าน Serial Port
     
-    # ... (Logic: Fetch object_order from DB) ...
+    # เนื่องจากเรายังไม่มี DB, ให้ส่งคำสั่ง WATER_ALL ไปที่ ESP32 โดยตรง 
+    # และคาดหวังว่า ESP32 จะมี Logic ในการรดน้ำตามลำดับอยู่แล้ว
+    
+    response = sc.send_serial_command("WATER_ALL")
 
-    print("Local Device: Serial Command SENT for all objects in sequence.")
-    return jsonify({"status": "success", "message": "All watering commands sent."})
+    print(f"Local Device: Serial Command SENT for all objects in sequence. Response: {response}")
+    
+    if "ACK" in response.upper():
+        return jsonify({"status": "success", "message": "All watering commands sent."})
+    else:
+        return jsonify({"status": "error", "message": f"Water All command failed: {response}"}), 500
 
-# เพิ่มโค้ดนี้ใน local_listener.py (ก่อน if __name__ == '__main__':)
-
-# ในไฟล์ local_listener.py:
-
-# 1. ⚠️ ต้องเปลี่ยน Import: ลบ render_template ออกถ้าคุณไม่ใช้
-#    จาก: from flask import Flask, request, jsonify, render_template
-#    เป็น: 
-from flask import Flask, request, jsonify 
-#    หรือใช้แค่ import Flask และ import jsonify ถ้าคุณใช้แค่ 2 ตัวนี้
-
-# ... (โค้ดส่วนอื่น) ...
 
 @app.route('/', methods=['GET'])
 def health_check():
@@ -135,7 +168,8 @@ def health_check():
     <p>API Endpoints: 
         <ul>
             <li>/process/detect (POST)</li>
-            <li>/action/water (POST)</li>
+            <li>/action/water_specific (POST)</li>
+            <li>/action/water_all (POST)</li>
         </ul>
     </p>
 </body>
@@ -147,6 +181,4 @@ def health_check():
 
 if __name__ == '__main__':
     # รัน Local Listener บนพอร์ตที่ Render เข้าถึงได้ (เช่น 5001)
-    # ⚠️ ให้รันโค้ดนี้ใน Virtual Environment ที่ติดตั้ง AI/cv2/pyserial ไว้
-    # print(f"Local Listener running on port 5001. Ready to receive commands from Render ({LOCAL_DEVICE_URL})")
     app.run(host='0.0.0.0', port=5001)

@@ -29,7 +29,7 @@
                 :disabled="isLoading"
                 :class="{ 'highlight': highlightedObject === i }"
                 class="btn-specific">
-          รดจุดที่ **{{ i }}**
+          รดจุดที่ {{ i }}
         </button>
       </div>
     </div>
@@ -59,7 +59,7 @@ export default {
       this.highlightedObject = null;
 
       try {
-        const response = await axios.post(`${this.backendBaseUrl}/api/detect`);
+        const response = await axios.post(`${this.backendBaseUrl}/api/detect`,{},{setTimeout:180000});
         const data = response.data;
         
         if (data.status === 'success' && data.image_url) {

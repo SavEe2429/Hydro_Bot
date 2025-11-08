@@ -56,6 +56,11 @@ def initialize_serial_connection():
         print(f"🔄 Attempting to connect to {SERIAL_PORT_NAME} at {BAUD_RATE}...")
         ser = serial.Serial(SERIAL_PORT_NAME, BAUD_RATE, timeout=1)
         time.sleep(2)  # ให้เวลา Arduino/ESP32 รีเซ็ต
+
+        # 🎯 FIX: Clear any junk data in the buffer from startup messages
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+
         print(f"✅ Successfully connected to {SERIAL_PORT_NAME}")
         return True
     except serial.SerialException as e:
@@ -70,31 +75,38 @@ def send_serial_command(command: str) -> str:
     :param command: ข้อความคำสั่งที่ต้องการส่ง (เช่น 'WATER_ALL', 'WATER_ZONE:A')
     :return: ข้อความตอบกลับจากอุปกรณ์
     """
+    global ser
     # ... (โค้ดส่วนนี้คงเดิม)
     if not initialize_serial_connection():
         return "ERROR: Serial Connection Failed."
+    max_attempts = 3
+    for attempt in range(max_attempts):
+        try:
+            # clear buffer
+            ser.reset_input_buffer()
 
-    try:
-        # 1. Encode คำสั่งเป็น bytes และส่ง
-        command_bytes = (command + "\n").encode("utf-8")
-        ser.write(command_bytes)
-        print(f"-> Sent command: {command}")
+            command_bytes = (command + "\n").encode("utf-8")
+            ser.write(command_bytes)
+            print(f"-> Sent command (Attempt {attempt + 1}: {command})")
 
-        # 2. รอรับการตอบกลับ (Response)
-        time.sleep(0.1)
+            # waiting response
+            time.sleep(1)
 
-        response = receive_multi_line_report()
-        print(f"<- Received response: {response}")
-
-        if response:
-            return response
-        else:
-            return "TIMEOUT: No response from device."
-
-    except Exception as e:
-        print(f"❌ ERROR during serial communication: {e}")
-        return f"FATAL_ERROR: {e}"
-
+            if ser.in_waiting > 0:
+                # readline waiting response
+                response_line = ser.readline().decode("utf-8", errors= 'ignore').strip()
+                return response_line if response_line else "TIMEOUT : Empty response."
+            
+            if attempt < max_attempts - 1:
+                time.sleep(0.5)
+                continue
+        except UnicodeDecodeError as e:
+            print(f"❌ ERROR: Decoding failed: {e}. Clearing buffer and retrying.")
+            time.sleep(0.5)
+        except Exception as e:
+            return f"Fatal_Error: {e}"
+        
+    return "ERROR: Max retry attempts reached (TIMEOUT)."
 
 def close_serial_connection():
     """ปิดการเชื่อมต่อ Serial Port"""
@@ -107,70 +119,53 @@ def close_serial_connection():
         print("✅ Connection closed.")
 
 
-def receive_multi_line_report() -> str:
-    """
-    รับข้อมูลหลายบรรทัดจาก Serial จนกว่าจะเจอข้อความ 'REPORT_END'
-    """
-    if not ser or not ser.is_open:
-        return "ERROR: Serial Connection Not Ready."
+def read_all_available() -> str:
+        """Reads all available data from the buffer without blocking."""
+        # 🎯 FIX: ต้องประกาศใช้ global ser เพื่อให้เข้าถึง Object การเชื่อมต่อได้
+        global ser
 
-    full_report = ""
-    timeout_counter = 0
-    max_timeout = 50  # 5 วินาที (0.1 * 50)
-
-    while timeout_counter < max_timeout:
-        # 0.1 วินาทีที่รอรับข้อมูลจะช่วยให้ Serial Buffer มีเวลาส่งข้อมูลมา
-        time.sleep(0.1)
-
-        # 1. อ่านบรรทัด
+        if not ser or not ser.is_open:
+            return "ERROR: Serial Connection Not Ready"
+        
+        # Check if any data is waiting in the input buffer
         if ser.in_waiting > 0:
-            response_line = ser.readline().decode("utf-8").strip()
-
-            if response_line == "REPORT_END":
-                return full_report
-
-            full_report += response_line + "\n"
-            timeout_counter = 0  # รีเซ็ต timeout เมื่อได้รับข้อมูล
-        else:
-            timeout_counter += 1
-
-    return f"ERROR: TIMEOUT after reading partial report:\n{full_report}"
-
-
+            # Read all bytes available in the buffer
+            return ser.read_all().decode('utf-8', errors= 'ignore') # ⬅️ นี่คือ Method ที่ถูกต้อง
+        return ""
 # ----------------------------------------------------
 # ฟังก์ชันสำหรับการทดสอบ (สามารถรันแยกเพื่อทดสอบ Serial ได้)
 # ----------------------------------------------------
-if __name__ == "__main__":
-    # 🎯 FIX: กำหนดค่า SERIAL_PORT เป็น Environment Variable ชั่วคราว
-    #        เพื่อให้โค้ดส่วนบน (initialize_serial_connection) สามารถอ่านได้
+# if __name__ == "__main__":
+#     # 🎯 FIX: กำหนดค่า SERIAL_PORT เป็น Environment Variable ชั่วคราว
+#     #        เพื่อให้โค้ดส่วนบน (initialize_serial_connection) สามารถอ่านได้
 
-    # ⚠️ แทนที่ COM4 ด้วย PORT ที่คุณต้องการใช้ทดสอบจริง (COM4 ในกรณีของคุณ)
-    os.environ["SERIAL_PORT"] = "COM4"
+#     # ⚠️ แทนที่ COM4 ด้วย PORT ที่คุณต้องการใช้ทดสอบจริง (COM4 ในกรณีของคุณ)
+#     os.environ["SERIAL_PORT"] = "COM4"
 
-    # ดึงค่า SERIAL_PORT_NAME ใหม่จาก Environment ที่เพิ่งตั้ง
-    SERIAL_PORT_NAME = os.environ.get("SERIAL_PORT")
+#     # ดึงค่า SERIAL_PORT_NAME ใหม่จาก Environment ที่เพิ่งตั้ง
+#     SERIAL_PORT_NAME = os.environ.get("SERIAL_PORT")
 
-    find_available_ports()
+#     find_available_ports()
 
-    if initialize_serial_connection():
+#     if initialize_serial_connection():
 
-        user_input = ""
-        print("\n--- Starting Continuous Serial Test ---")
+#         user_input = ""
+#         print("\n--- Starting Continuous Serial Test ---")
 
-        # 🎯 โครงสร้างการวนลูปที่ถูกต้องตามหลักการ Python
-        while user_input != "0":
-            user_input = input()
-            # ส่งคำสั่ง 'r' (หรือคำสั่งใดๆ ที่ ESP32 คาดหวัง)
-            send_serial_command(user_input)
-            # response = receive_multi_line_report()
-            # print(f"Test Result: {response}")
+#         # 🎯 โครงสร้างการวนลูปที่ถูกต้องตามหลักการ Python
+#         while user_input != "0":
+#             user_input = input()
+#             # ส่งคำสั่ง 'r' (หรือคำสั่งใดๆ ที่ ESP32 คาดหวัง)
+#             send_serial_command(user_input)
+#             # response = receive_multi_line_report()
+#             # print(f"Test Result: {response}")
 
-            # อัปเดตตัวแปรสำหรับตรวจสอบเงื่อนไข
-            # Note: ต้องมั่นใจว่า ESP32 ส่ง '0' หรือ '1' กลับมา
-            # test_response = response.strip()
+#             # อัปเดตตัวแปรสำหรับตรวจสอบเงื่อนไข
+#             # Note: ต้องมั่นใจว่า ESP32 ส่ง '0' หรือ '1' กลับมา
+#             # test_response = response.strip()
 
-            # หยุดลูปชั่วคราวเพื่อป้องกันการรันที่เร็วเกินไป
-            time.sleep(0.5)
+#             # หยุดลูปชั่วคราวเพื่อป้องกันการรันที่เร็วเกินไป
+#             time.sleep(0.5)
 
-        print("✅ Continuous test stopped because device returned '0'.")
-        close_serial_connection()
+#         print("✅ Continuous test stopped because device returned '0'.")
+#         close_serial_connection()

@@ -1,12 +1,18 @@
 {
-    "obj_count": 1,
+    "status": false,
+    "output_path": "Model/stitched/stitched.jpg",
+    "object_count": 0,
+    "object_order": [],
     "objects": [
         {
-            "object_id": 0,
-            "object_center": [
-                335,
-                376
-            ]
+            "object_id": 1,
+            "center_x": 265,
+            "center_y": 416
+        },
+        {
+            "object_id": 2,
+            "center_x": 361,
+            "center_y": 675
         }
     ]
 }
