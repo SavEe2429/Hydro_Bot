@@ -61,7 +61,7 @@ def capture_img():
 
 
         # 4. ตรวจสอบสัญญาณสิ้นสุด
-        if "REPORT_END" in serial_data or "SCAN_FINISHED" in serial_data:
+        if "REPORT_END" in serial_data :
             print("🛑 Received SCAN_FINISHED signal. Halting.")
             break
 

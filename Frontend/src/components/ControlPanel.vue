@@ -59,7 +59,7 @@ export default {
       this.highlightedObject = null;
 
       try {
-        const response = await axios.post(`${this.backendBaseUrl}/api/detect`,{},{setTimeout:180000});
+        const response = await axios.post(`${this.backendBaseUrl}/api/detect`,{},{timeout:180000});
         const data = response.data;
         
         if (data.status === 'success' && data.image_url) {
