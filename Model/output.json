@@ -1,7 +1,7 @@
 {
     "status": false,
-    "output_path": "Model/stitched/stitched.jpg",
-    "object_count": 0,
+    "output_path": "Model/img_detection/detected.jpg",
+    "object_count": 1,
     "object_order": [],
     "objects": [
         {

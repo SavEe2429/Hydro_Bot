@@ -87,7 +87,7 @@ export default {
 
         if (data.status === 'success' && data.image_url) {
           this.imageUrl = data.image_url;
-          this.objectCount = data.objectCount || 0;
+          this.objectCount = data.object_count || 0;
           alert(`✅ ประมวลผลสำเร็จ! ตรวจพบวัตถุทั้งหมด ${this.objectCount} จุด`);
         } else {
           alert('❌ การตรวจจับล้มเหลว: ' + (data.message || 'โครงสร้างข้อมูลไม่ถูกต้อง'));

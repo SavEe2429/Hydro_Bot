@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
-import os , sys , time  
-import requests         
+import os , sys , time  ,json
+import requests        
 import numpy as np 
 import serial_control as sc
 import base64 
@@ -129,9 +129,11 @@ def load_json_file():
     """
     global GLOBAL_JSON
     jsonfile = read_json("Model/output.json")
-    if not jsonfile or jsonfile.get('obj_count',0) == 0:
+    print("jsonfile ",jsonfile)
+    if not jsonfile or jsonfile.get('object_count',0) == 0:
         return jsonify({"status": "error", "message": "AI Detection reported no objects in JSON."}), 404
-    
+    print("jsonfile work")
+    print("jsonfile count : ",jsonfile['object_count'])
     object_centers_dict = {}
     object_order_list = []
 
