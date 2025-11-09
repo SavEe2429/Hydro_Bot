@@ -14,7 +14,7 @@ CORS(app, resources={r"/api/*": {
 }})
 # Note: r"/api/*" คือการบอกว่าให้ใช้กฎนี้กับทุก Endpoint ที่ขึ้นต้นด้วย /api/
 
-# 🚨 ดึง URL ของ Local Device (Cloudflare Tunnel URL) จาก Environment Variable
+# 🚨 ดึง URL ของ Local Device (Cloudflare Tunnel URL/ NGROK) จาก Environment Variable
 LOCAL_DEVICE_URL = os.environ.get("LOCAL_DEVICE_URL")
 
 # --- Endpoints สำหรับการควบคุม ---
@@ -62,6 +62,43 @@ def api_detect():
             "object_count": 0
         }), 500
 
+@app.route('/api/loadjson' , methods = ['POST'])
+def load_json():
+    """
+    Endpoint สำหรับสั่งโหลดข้อมูลจากไฟล์ output.json
+    """
+    try:
+        local_response = requests.post(f"{LOCAL_DEVICE_URL}/loading/loadjson", timeout=300)
+        local_response.raise_for_status()
+
+        data = local_response.json()
+
+        return jsonify({
+            "status":"success",
+            "message":"Loading json file complete.",
+            "image_url":data.get("image_url",""),
+            "object_count":data.get("object_count",0),
+            "object_data":data.get("object_data",[])
+        })
+    except requests.exceptions.Timeout:
+        return jsonify({
+            "status": "error",
+            "message": "Local device took too long to process (Timeout).",
+            "object_count": 0
+        }), 504
+    except requests.exceptions.RequestException as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Could not connect to local device listener: {e}",
+            "object_count": 0
+        }), 503
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"An unexpected error occurred on Render: {e}",
+            "object_count": 0
+        }), 500
+    
 @app.route('/api/water', methods=['POST'])
 def api_water_specific():
     """
@@ -76,7 +113,7 @@ def api_water_specific():
     print(f"Received command to water specific object ID: {object_id}")
     try:
         # ส่งคำสั่งไปยัง Local Listener เพื่อควบคุม Serial Port
-        local_response = requests.post(f"{LOCAL_DEVICE_URL}/action/water_specific", json={"object_id": object_id}, timeout=30)
+        local_response = requests.post(f"{LOCAL_DEVICE_URL}/action/water_specific", json={"object_id": object_id}, timeout=300)
         local_response.raise_for_status()
 
         return jsonify({
@@ -95,7 +132,7 @@ def api_water_all():
     print("Received command to water all objects.")
     try:
         # ส่งคำสั่งไปยัง Local Listener เพื่อรดน้ำตามลำดับที่ AI จัดเรียงไว้
-        local_response = requests.post(f"{LOCAL_DEVICE_URL}/action/water_all", timeout=60)
+        local_response = requests.post(f"{LOCAL_DEVICE_URL}/action/water_all", timeout=300)
         local_response.raise_for_status()
         
         return jsonify({

@@ -98,7 +98,7 @@ def detect_ai(stitched_img_path):
             cv2.putText(img, f"{dist:.1f}", (mid_x, mid_y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 2)
 
 
-        cv2.imwrite(output_img_path, img)
+        # cv2.imwrite(output_img_path, img)
         
         # 5. บันทึก JSON
         with open("Model/output.json", "w") as f:

@@ -23,7 +23,7 @@ def capture_img():
     print("✅ Scan sequence initiated. Waiting for ARRIVED signals...")
 
     # --- 2. INTERACTIVE LOOP: รอสัญญาณ ARRIVED ---
-    shots_count = 10
+    shots_count = 12
     max_wait_sec = 120  # 3 นาที สำหรับการสแกนทั้งหมด
     start_time = time.time()
     captured_files = []

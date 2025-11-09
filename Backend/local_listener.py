@@ -1,9 +1,9 @@
 from flask import Flask, request, jsonify
-import os , sys , time
-import requests 
+import os , sys , time  
+import requests         
 import numpy as np 
 import serial_control as sc
-import base64
+import base64 
 
 # 🎯 FIX: ต้องใส่ path ของ Model เพื่อให้ import ได้
 sys.path.append(os.path.join(os.path.dirname(__file__),'..','Model'))
@@ -16,13 +16,23 @@ app = Flask(__name__)
 # 🎯 -----------------------------------------------------------------
 # GLOBAL STATE: ใช้เก็บคำสั่งล่าสุดที่มาจาก Web
 # -----------------------------------------------------------------
-LATEST_WEB_COMMAND = {
-    "command": "NONE", 
-    "object_id": None, 
-    "timestamp": 0
+GLOBAL_JSON = {
+    "object_order": [],
+    "object_centers":{},
+    "last_run_time": 0
 }
 
-
+def read_json(filepath="Model/output.json"):
+    """Read data from json file"""
+    try:
+        fullpath = os.path.join(os.path.dirname(__file__),'..',filepath)
+        with open(fullpath,'r') as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        print(f"Error reading JSON FILE : {e}")
+        return None
+    
 def image_to_base64(filepath):
     """แปลงไฟล์ภาพให้เป็น Base64 String พร้อม MIME type"""
     try:
@@ -81,7 +91,7 @@ def process_and_detect_ai():
     return {
         "image_url": image_base64_data,
         "object_count": object_count,
-        "object_order": detection_results.get('object_order', [])
+        # "object_order": detection_results.get('object_order', [])
     }
 
 
@@ -105,12 +115,47 @@ def local_process_detect():
             "status": "success",
             "image_url": results["image_url"],
             "object_count": results["object_count"],
-            "object_order": results["object_order"] # คืนค่าลำดับการรดน้ำ
+            # "object_order": results["object_order"] # คืนค่าลำดับการรดน้ำ
         })
     except Exception as e:
         print(f"AI Processing Error: {e}")
         return jsonify({"status": "error", "message": f"Local AI processing failed: {e}"}), 500
 
+
+@app.route('/loading/loadjson', methods=['POST'])
+def load_json_file():
+    """
+    โหลดข้อมูลจาก json file และอัปเดตค่าของ GLOBAL_JSON
+    """
+    global GLOBAL_JSON
+    jsonfile = read_json("Model/output.json")
+    if not jsonfile or jsonfile.get('obj_count',0) == 0:
+        return jsonify({"status": "error", "message": "AI Detection reported no objects in JSON."}), 404
+    
+    object_centers_dict = {}
+    object_order_list = []
+
+    for obj in jsonfile['objects']:
+        obj_id = obj['object_id']
+
+        object_centers_dict[obj_id] = {
+            'x':obj.get('center_x',0),
+            'y':obj.get('center_y',0)
+        }
+        object_order_list.append(obj_id)
+    
+    GLOBAL_JSON.update({
+        "object_order": object_order_list,
+        "object_centers":object_centers_dict,
+        "last_run_time": time.time()
+    })
+    image_base64_data = image_to_base64(jsonfile['output_path']) 
+    
+    return jsonify({
+        "status":"success",
+        "image_url":image_base64_data,
+        "object_count":jsonfile['object_count']
+    }),200
 
 @app.route('/action/water_specific', methods=['POST'])
 def local_water_specific():
@@ -125,7 +170,7 @@ def local_water_specific():
     
     print(f"Local Device: Serial Command SENT for object ID {object_id}. Response: {response}")
     
-    if "ACK" in response.upper():
+    if "WATERING_SPECIFIC_COMPLETE" in response.upper():
         return jsonify({"status": "success", "message": f"Serial command sent for {object_id}"})
     else:
         return jsonify({"status": "error", "message": f"Serial command failed for {object_id}: {response}"}), 500
