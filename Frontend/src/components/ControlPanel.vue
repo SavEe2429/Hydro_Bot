@@ -79,7 +79,9 @@ export default {
     },
     async LoadJsonFile() {
       this.isLoading = true;
-      this.imageUrl = ''
+      this.imageUrl = '';
+      this.objectCount = 0;
+      this.highlightedObject = null;
 
       try {
         const response = await axios.post(`${this.backendBaseUrl}/api/loadjson`);
@@ -116,6 +118,7 @@ export default {
     },
 
     async waterAll() {
+      this.isLoading = true;
       if (this.objectCount === 0) {
         alert("กรุณาตรวจจับวัตถุก่อน หรือไม่มีวัตถุให้รดน้ำ");
         return;
@@ -130,6 +133,8 @@ export default {
         }
       } catch (error) {
         console.error("API Error (Water All):", error);
+      }finally{
+        this.isLoading = false;
       }
     }
   }
