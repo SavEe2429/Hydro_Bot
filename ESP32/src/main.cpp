@@ -2,16 +2,6 @@
 #include <ArduinoJson.h>
 
 // Motor pins
-// CurrentPosX : 36813
-// CurrentPosZ : 19836
-// CurrentPosX : 36799
-// CurrentPosZ : 19912
-// CurrentPosX : 36869
-// CurrentPosZ : 19911
-
-// avg posX = 36877
-// avg posZ = 19786
-
 #define Limit_X 18
 #define Limit_Z 4
 const int A_IN1 = 14, A_IN2 = 12, A_IN3 = 13, A_IN4 = 15; // X
@@ -27,14 +17,11 @@ const float DIST_PER_REV = 15.71;
 const float HOME_OFFSET_MM = 3;
 
 // Motor state
-long stepsToMoveX = 0, stepsToMoveZ = 0;
+float stepsToMoveX = 0, stepsToMoveZ = 0;
 int dirX = 1, dirZ = 1;
 int seqIndexX = 0, seqIndexZ = 0;
 unsigned long lastStepTimeX = 0, lastStepTimeZ = 0;
-long currentPosX = 0, currentPosZ = 0;
-
-// string receive
-String receivedData = "";
+float currentPosX = 0, currentPosZ = 0;
 
 // Backoff steps
 long backoffSteps = (HOME_OFFSET_MM / DIST_PER_REV) * STEPS_PER_REV;
@@ -45,11 +32,13 @@ bool flagX, flagZ;
 void IRAM_ATTR LimitInteruptX()
 {
   flagX = true;
+
   dirX = (currentPosX > 18413) ? -1 : 1;
 }
 void IRAM_ATTR LimitInteruptZ()
 {
   flagZ = true;
+
   dirZ = (currentPosZ > 9843) ? -1 : 1;
 }
 
@@ -93,22 +82,23 @@ void stepMotorZ()
     stepsToMoveZ--;
   }
 }
-long targetX, diffX;
-long targetZ, diffZ;
+float targetX, diffX;
+float targetZ, diffZ;
 // ================= Move To =================
 void moveX_to(float distance_pixel)
 {
-  targetX = distance_pixel * 30.73;
+  targetX = distance_pixel * 40.92;
   diffX = targetX - currentPosX;
   dirX = (diffX >= 0) ? 1 : -1;
   stepsToMoveX = abs(diffX);
 }
 void moveZ_to(float distance_pixel)
 {
-  targetZ = distance_pixel * 30.92;
+  targetZ = distance_pixel * 29.38;
   diffZ = targetZ - currentPosZ;
   dirZ = (diffZ >= 0) ? 1 : -1;
   stepsToMoveZ = abs(diffZ);
+  // printf("targetZ : %.2f , currentZ : %.2f , diffZ : diffZ : %.2f , stepstomoveZ : %.2f\n",targetZ,currentPosZ,diffZ,stepsToMoveZ);
 }
 
 void backoffX()
@@ -122,7 +112,6 @@ void backoffX()
   }
   stopMotor(A_IN1, A_IN2, A_IN3, A_IN4);
   attachInterrupt(digitalPinToInterrupt(Limit_X), LimitInteruptX, FALLING);
-  printf("CurrentPosX : %d\n", currentPosX);
   stepsToMoveX = 0;
   currentPosX = 0;
 }
@@ -138,90 +127,192 @@ void backoffZ()
   }
   stopMotor(B_IN1, B_IN2, B_IN3, B_IN4);
   attachInterrupt(digitalPinToInterrupt(Limit_Z), LimitInteruptZ, FALLING);
-  printf("CurrentPosZ : %d\n", currentPosZ);
   stepsToMoveZ = 0;
   currentPosZ = 0;
 }
-
-bool homing = false;
+bool isdohoming = false;
 // ================= Homing Function =================
 void doHoming()
 {
-  homing = true;
-  // ---------- Homing X ----------
-  Serial.println("Homing X...");
-  dirX = -1;                           // วิ่งเข้าหาลิมิต
-  while (digitalRead(Limit_X) == HIGH) // รอจนกว่าจะกด (LOW)
+  isdohoming = true;
+  // ---------- Homing X (Blocking, Silent) ----------
+  dirX = -1;
+  while (!flagX)
   {
     stepMotorX();
-    delayMicroseconds(STEP_DELAY);
-  }
-
-  // overshoot เข้าไปอีกนิด
-  // for (int i = 0; i < 50; i++)
-  // {
-  //   stepMotorX();
-  //   delayMicroseconds(STEP_DELAY);
-  // }
+  } // ⬅️ Blocking (ต้องพึ่งพา stepMotorX Non-Blocking)
   backoffX();
   flagX = false;
   currentPosX = 0;
-  Serial.println("Homing X done.");
 
-  // ---------- Homing Z ----------
-  Serial.println("Homing Z...");
+  // ---------- Homing Z (Blocking, Silent) ----------
   dirZ = -1;
-  while (digitalRead(Limit_Z) == HIGH)
+  while (!flagZ)
   {
     stepMotorZ();
-    delayMicroseconds(STEP_DELAY);
   }
-
-  // overshoot เข้าไปอีกนิด
-  // for (int i = 0; i < 50; i++)
-  // {
-  //   stepMotorZ();
-  //   delayMicroseconds(STEP_DELAY);
-  // }
-
   backoffZ();
   flagZ = false;
   currentPosZ = 0;
-  Serial.println("Homing Z done.");
 
-  Serial.println("Homing finished.");
+  isdohoming = false;
 }
 
-void scanArea(long X_min, long X_max, long Z_max)
+// 🎯 SCAN STATE MACHINE VARIABLES
+enum State
 {
-  // 1. ขยับ Z ไปตรงกลาง
-  long Z_mid = Z_max / 2;
-  moveZ_to(Z_mid);
+  // ===================  Default  =====================
+  IDLE,
+  HOMING,
 
-  // ขยับจนถึง Z_mid
-  while (stepsToMoveZ > 0)
-  {
-    stepMotorZ();
-  }
-  stopMotor(B_IN1, B_IN2, B_IN3, B_IN4);
-  Serial.println("Z moved to center.");
+  // ===================  Scan  =====================
+  MOVING_SCAN_Z,
+  MOVING_SCAN_X,
+  HOMING_SCAN,
+  WAITING_ACK,
+  SCANNING_X_MOVE,
+  WAITING_ACK_X,
+  SCAN_COMPLETE,
 
-  // 2. ขยับ X 4 รอบไป-กลับ
-  for (int i = 0; i < 16; i++)
+  // ===================  Watering  =====================
+  MOVING_WATER_Z,
+  MOVING_WATER_X,
+  WATER_COMPLETE
+};
+
+State currentState = IDLE;
+int currentShot = 0;
+int totalShots = 0;
+float currentGap = 0.0;
+float X_MIN_POS = 300.0, X_MAX_POS = 900.0;
+float Z_CEN_POS = 670.0;
+float Z_mid_target = 0.0;
+int id;
+String incomingCommand = "";
+String currentCommand = "";
+
+// ----------------------------------------------------
+// 🎯 NON-BLOCKING SCAN/MOVE LOGIC
+// ----------------------------------------------------
+
+void handleScan()
+{
+  switch (currentState)
   {
-    // ไป X_max
-    float spotX = X_min + (85 * i);
-    moveX_to(spotX);
-    while (stepsToMoveX > 0)
+  case IDLE:
+    break;
+
+  case HOMING:
+    doHoming();
+    currentState = IDLE;
+    break;
+
+  case HOMING_SCAN:
+    // 1. ทำ Homing แบบ Blocking
+    doHoming();
+    moveZ_to(Z_CEN_POS / 2);
+    currentState = MOVING_SCAN_Z; // ไปสถานะถัดไป
+    break;
+
+  case MOVING_SCAN_Z:
+    // 2. ขยับ Z ไปตรงกลาง (Non-Blocking Move Init)
+    // 💡 Logic: ถ้า stepsToMoveZ ยัง > 0 ให้ stepMotorZ ใน loop() จัดการต่อ
+    if (stepsToMoveZ <= 0)
     {
-      stepMotorX();
+      // ถ้าขยับเสร็จแล้ว (stepMotorZ ลด stepsToMoveZ จนหมด)
+      stopMotor(B_IN1, B_IN2, B_IN3, B_IN4);
+      Serial.println("WAITING_COMMAND"); // ⬅️ สั่งให้ Python ส่ง CAPTURE:shots
+      Serial.flush();
+      currentState = WAITING_ACK;
     }
-    // ✅ ส่งสัญญาณ arrived ไป Python
-    Serial.println("arrived");
-    delay(3000);
-  }
+    break;
 
-  Serial.println("Scan finished, holding position.");
+  case WAITING_ACK:
+    // 3. รอคำสั่ง CAPTURE:shots จาก Python ใน processCommand()
+    break;
+
+  case SCANNING_X_MOVE:
+    // 4. ขยับ X ไปจุดถัดไป (Non-Blocking Move Init)
+    Serial.println(currentShot);
+    if (currentShot < totalShots)
+    {
+      float spotX = min(X_MIN_POS + (currentGap * currentShot), X_MAX_POS - 50);
+      moveX_to(spotX);
+      currentState = MOVING_SCAN_X;
+    }
+    else
+    {
+      // 5. สแกนครบแล้ว
+      currentState = SCAN_COMPLETE;
+    }
+    break;
+
+  case MOVING_SCAN_X:
+    // 6. รอให้ stepsToMoveX เสร็จ
+    if (stepsToMoveX <= 0)
+    {
+      // 7. ถึงจุดแล้ว: ส่งสัญญาณ ARRIVED ไป Python
+      stopMotor(A_IN1, A_IN2, A_IN3, A_IN4);
+      Serial.println("ARRIVED");
+      Serial.flush();
+      currentState = WAITING_ACK_X; // เข้าสู่สถานะรอ CAPTURED
+    }
+    break;
+
+  case WAITING_ACK_X:
+    // 8. รอการตอบรับ 'CAPTURED' จาก Python ใน processCommand()
+    break;
+
+  case SCAN_COMPLETE:
+    // stopMotor(A_IN1, A_IN2, A_IN3, A_IN4);
+    doHoming();                   // กลับไป Home เมื่อเสร็จสิ้น
+    Serial.println("REPORT_END"); // ⬅️ ส่งสัญญาณจบงาน
+    Serial.flush();
+    currentState = IDLE;
+    break;
+
+  // ------------------------ WATERING -----------------------------------
+  case MOVING_WATER_Z:
+    if (stepsToMoveZ <= 0)
+    {
+      // ถ้าขยับเสร็จแล้ว (stepMotorZ ลด stepsToMoveZ จนหมด)
+      stopMotor(B_IN1, B_IN2, B_IN3, B_IN4);
+      // Serial.println("WAITING_COMMAND"); // ⬅️ สั่งให้ Python ส่ง CAPTURE:shots
+      // Serial.flush();
+      currentState = MOVING_WATER_X;
+    }
+    break;
+
+  case MOVING_WATER_X:
+    if (stepsToMoveX <= 0)
+    {
+      stopMotor(A_IN1, A_IN2, A_IN3, A_IN4);
+      // Serial.println("WAITING_COMMAND"); // ⬅️ สั่งให้ Python ส่ง CAPTURE:shots
+      // Serial.flush();
+      currentState = WATER_COMPLETE;
+    }
+    break;
+
+  case WATER_COMPLETE:
+    if (currentCommand == "WATER_SPECIFIC")
+    {
+      Serial.println("WATERING_SPECIFIC_COMPLETE");
+      Serial.flush();
+    }
+    if (currentCommand == "WATER_ALL")
+    {
+      Serial.print("\nWATERING_"); // ส่งการตอบกลับ
+      Serial.print(id);            // ส่งการตอบกลับ
+      Serial.println("_COMPLETE"); // ส่งการตอบกลับ
+      Serial.flush();
+    }
+    currentState = IDLE;
+    break;
+  }
+}
+
+void handleWaterSpecific()
+{
 }
 
 // ================= Setup =================
@@ -242,95 +333,176 @@ void setup()
   pinMode(B_IN2, OUTPUT);
   pinMode(B_IN3, OUTPUT);
   pinMode(B_IN4, OUTPUT);
-  doHoming();
-  homing = false;
+  // homing = false;
   Serial.println("Ready.");
 }
 
-bool startScan = false;
+void processCommand(String command);
 
 void loop()
 {
-  if (flagX == true) // ทำงานเมื่อ Interrupt X ถูกเรียกเท่านั้น
+  // 1. Interrupt Logic (คงเดิม)
+  if (flagX)
   {
-    backoffX(); // ส่ง flagX (Global) แบบอ้างอิงเข้าไป
-    printf("CurrentPosX : %d\n", currentPosX);
-    receivedData = "";
+    backoffX();
+  }
+  if (flagZ)
+  {
+    backoffZ();
   }
 
-  if (flagZ == true) // ทำงานเมื่อ Interrupt Z ถูกเรียกเท่านั้น
+  // 2. Motor Logic (Non-Blocking Stepper)
+  if (stepsToMoveX > 0)
   {
-    backoffZ(); // ส่ง flagZ (Global) แบบอ้างอิงเข้าไป
-    printf("CurrentPosZ : %d\n", currentPosZ);
-    receivedData = "";
+    stepMotorX();
   }
-  // 1. รับและประมวลผลข้อมูล Serial (ถ้ามี)
-  // ใช้วิธีรับข้อมูลทั้งหมดจนกว่าจะเจออักขระขึ้นบรรทัดใหม่ '\n'
-  if (Serial.available())
+  if (stepsToMoveZ > 0)
   {
-    // อ่าน String ทั้งหมดจนกว่าจะเจออักขระขึ้นบรรทัดใหม่ '\n'
-    String input = Serial.readStringUntil('\n');
-
-    // ลบช่องว่างหรืออักขระที่ไม่จำเป็นที่ต้นและท้าย String (รวมถึง '\r')
-    input.trim();
-
-    // เก็บคำสั่งที่พร้อมใช้งาน
-    receivedData = input;
-
-    // แสดงคำสั่งที่ได้รับ (เพื่อตรวจสอบ)
-    Serial.print("Command received: ");
-    Serial.println(receivedData);
+    stepMotorZ();
   }
 
-  // 2. ตรวจสอบคำสั่งและควบคุมมอเตอร์ (นอกเหนือจากการรับ Serial)
+  // 3. Handle Scan State Machine
+  handleScan();
 
-  // ถ้าได้รับคำสั่ง "X"
-  if (receivedData.equalsIgnoreCase("X"))
+  // 4. Serial Command Receiver
+  while (Serial.available())
   {
-    // ใช้วิธี if เพื่อตรวจสอบเงื่อนไขทุกครั้งที่ loop() ทำงาน
-    if (digitalRead(Limit_X) == HIGH)
+    char incomingChar = Serial.read();
+    if (incomingChar == '\n')
     {
-      // Serial.println("Executing Motor X step...");
-      stepMotorX();
-      delayMicroseconds(STEP_DELAY);
+      processCommand(incomingCommand);
+      incomingCommand = "";
+    }
+    else
+    {
+      incomingCommand += incomingChar;
     }
   }
-  // ถ้าได้รับคำสั่ง "Z"
-  else if (receivedData.equalsIgnoreCase("Z"))
+}
+
+void processCommand(String command)
+{
+  command.toUpperCase(); // ⬅️ FIX: ใช้ ToUpperCase() เพื่อความเข้ากันได้กับ Python
+
+  if (command == "HOMING"){
+    Serial.println("");
+    Serial.flush();
+    currentState = HOMING;
+    return;
+  }
+  if (command == "SCAN")
   {
-    if (digitalRead(Limit_Z) == HIGH)
+    // 🎯 FIX: เริ่มต้น State Machine (จะเรียก Homing ใน handleScan)
+    if (currentState == IDLE || currentState == SCAN_COMPLETE)
     {
-      // Serial.println("Executing Motor Z step...");
-      stepMotorZ();
-      delayMicroseconds(STEP_DELAY);
+      currentState = HOMING_SCAN;
+      Serial.println("SCAN_ACK");
+      Serial.flush();
+    }
+    else
+    {
+      Serial.println("ERROR: ALREADY_BUSY");
+      Serial.flush();
+    }
+    return;
+  }
+
+  // 🎯 จัดการ CAPTURE:shots (รับค่าตัวแปร)
+  if (command.startsWith("CAPTURE:"))
+  {
+    if (currentState == WAITING_ACK)
+    {
+      int separatorIndex = command.indexOf(':');
+      String valueStr = command.substring(separatorIndex + 1);
+      totalShots = valueStr.toInt();
+
+      currentGap = (X_MAX_POS - X_MIN_POS) / totalShots;
+      currentShot = 0;
+
+      // 2. เริ่มต้นลูปสแกน X
+      currentState = SCANNING_X_MOVE;
+      Serial.println("STATUS: X_SEQUENCE_START");
+      return;
     }
   }
 
-  if (receivedData.equalsIgnoreCase("R"))
+  // 🎯 จัดการสัญญาณ ACK (CAPTURED) จาก Python
+  if (command == "CAPTURED" && currentState == WAITING_ACK_X)
   {
-    printf("CurrentPosX : %d\n", currentPosX);
-    printf("CurrentPosZ : %d\n", currentPosZ);
-    printf("dirX : %d , dirZ : %d\n", dirX, dirZ);
-    printf("flagX : %s , flagZ : %s\n", flagX ? "T" : "F", flagZ ? "T" : "F");
-    printf("diffX = %ld , diffZ = %ld\n", diffX,diffZ);
-    printf("stepsToMoveX = %ld , stepsToMoveZ = %ld\n", stepsToMoveX,stepsToMoveZ);
-    receivedData = "";
-  }
-  if (receivedData.equalsIgnoreCase("H"))
-  {
-    doHoming();
-    receivedData = "";
-  }
-  if (receivedData.equalsIgnoreCase("1"))
-  {
-    moveX_to(1200);
-    receivedData = "";
-  }
-  if (receivedData.equalsIgnoreCase("2"))
-  {
-    moveZ_to(640);
-    receivedData = "";
+    currentShot++;                  // ไปจุดต่อไป
+    currentState = SCANNING_X_MOVE; // กลับไปลูปสแกน X
+    return;
   }
 
-  // โค้ดอื่นๆ ที่ต้องทำงานตลอดเวลา (ถ้ามี)
+  // 2. ตรวจสอบคำสั่ง WATER_SPECIFIC
+  // รูปแบบคำสั่งที่มาจาก Python: "WATER_SPECIFIC:3"
+  if (command.startsWith("WATER_SPECIFIC:"))
+  {
+    currentCommand = "WATER_SPECIFIC";
+    // find symbol index from command
+    int colonIndex = command.indexOf(":");
+    String valueStr = command.substring(colonIndex + 1);             // 3,123,456
+    
+    int firstComma = valueStr.indexOf(",");
+    int SecComma = valueStr.indexOf(",", firstComma + 1);
+    if (colonIndex == -1 || firstComma == -1 || SecComma == -1)
+    {
+      Serial.println("Invalid index value.");
+      return;
+    }
+    // substring to assign value
+    String valueStrID = valueStr.substring(0, firstComma);           // 3
+    String valueStrX = valueStr.substring(firstComma + 1, SecComma); // 123
+    String valueStrZ = valueStr.substring(SecComma + 1);             // 456
+    // tran string type to int
+    id = valueStrID.toInt();
+    float pos_X = valueStrX.toFloat();
+    float pos_Z = valueStrZ.toFloat();
+    moveX_to(pos_X);
+    moveZ_to(pos_Z);
+    Serial.println(""); // ส่งการตอบกลับ
+    currentState = MOVING_WATER_Z;
+    return;
+  }
+
+  if (command.startsWith("CHECK_WATER_ALL")) // WATER_ALL:3,123,456
+  {
+    // ถ้าใช้ read_all_available() ต้องมี \n ข้างหน้าเพื่อส่งค่าว่างตอบกลับคำสั่ง send_serial_command()
+    Serial.println("\nWAITING_COMMAND"); // ส่งการตอบกลับ
+    return;
+  }
+
+  // 3. ตรวจสอบคำสั่ง WATER_ALL
+  if (command.startsWith("WATER_ALL:")) // WATER_ALL:3,123,456
+  {
+    currentCommand = "WATER_ALL";
+    // find symbol index from command
+    int colonIndex = command.indexOf(":");
+    String valueStr = command.substring(colonIndex + 1);             // 3,123,456
+
+    int firstComma = valueStr.indexOf(",");
+    int SecComma = valueStr.indexOf(",", firstComma + 1);
+    if (colonIndex == -1 || firstComma == -1 || SecComma == -1)
+    {
+      Serial.println("Invalid index value.");
+      return;
+    }
+    // substring to assign value
+    String valueStrID = valueStr.substring(0, firstComma);           // 3
+    String valueStrX = valueStr.substring(firstComma + 1, SecComma); // 123
+    String valueStrZ = valueStr.substring(SecComma + 1);             // 456
+    // tran string type to int
+    id = valueStrID.toInt();
+    float pos_X = valueStrX.toFloat();
+    float pos_Z = valueStrZ.toFloat();
+    moveX_to(pos_X);
+    moveZ_to(pos_Z);
+    Serial.println(""); // ส่งการตอบกลับ
+    currentState = MOVING_WATER_Z;
+    return;
+  }
+
+  // หากไม่มีคำสั่งใดตรงกัน
+  Serial.print("ERROR: UNKNOWN COMMAND: ");
+  Serial.println(command);
 }
