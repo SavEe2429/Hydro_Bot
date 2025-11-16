@@ -81,18 +81,21 @@ def load_json():
             "object_data":data.get("object_data",[])
         })
     except requests.exceptions.Timeout:
+        # 🎯 เมื่อ Local Listener ทำงานเกิน 5 นาที
         return jsonify({
             "status": "error",
             "message": "Local device took too long to process (Timeout).",
             "object_count": 0
         }), 504
     except requests.exceptions.RequestException as e:
+        # 🎯 เมื่อ Tunnel/Local Listener เข้าไม่ถึง
         return jsonify({
             "status": "error",
             "message": f"Could not connect to local device listener: {e}",
             "object_count": 0
         }), 503
     except Exception as e:
+        # 🎯 เมื่อเกิด Crash ภายในโค้ด Render เอง
         return jsonify({
             "status": "error",
             "message": f"An unexpected error occurred on Render: {e}",

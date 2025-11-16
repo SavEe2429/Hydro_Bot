@@ -1,13 +1,33 @@
 {
-    "status": false,
-    "output_path": "Model/img_detection/detected.jpg",
-    "object_count": 1,
-    "object_order": [],
+    "status": true,
+    "output_path": "Model/img_detection\\detected.jpg",
+    "object_count": 4,
+    "object_order": [
+        1,
+        2,
+        3,
+        4
+    ],
     "objects": [
         {
             "object_id": 1,
-            "center_x": 355,
-            "center_y": 676
+            "center_x": 216,
+            "center_z": 206
+        },
+        {
+            "object_id": 2,
+            "center_x": 210,
+            "center_z": 509
+        },
+        {
+            "object_id": 3,
+            "center_x": 636,
+            "center_z": 203
+        },
+        {
+            "object_id": 4,
+            "center_x": 645,
+            "center_z": 510
         }
     ]
 }

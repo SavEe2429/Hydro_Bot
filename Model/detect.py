@@ -75,8 +75,8 @@ def detect_ai(stitched_img_path):
             # บันทึกค่ากึ่งกลางของวัตถุที่เจอ
             output_data["objects"].append({
                 "object_id": i + 1, # Start ID from 1
-                "center_x": cx1, 
-                "center_y": cy1,
+                "center_x": cy1, # แกน x ของรูป = แกน y ของเครื่อง
+                "center_z": cx1, # แกน z ของรูป = แกน x ของเครื่อง
             })
             
             cv2.putText(img, f"({cx1},{cy1})", (cx1 - 50, cy1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
@@ -100,15 +100,16 @@ def detect_ai(stitched_img_path):
 
         # cv2.imwrite(output_img_path, img)
         
-        # 5. บันทึก JSON
-        with open("Model/output.json", "w") as f:
-            json.dump(output_data, f, indent=4)
             
-        # 6. คืนค่าสำเร็จ
+        # 5. คืนค่าสำเร็จ
         output_data["status"] = True
         output_data["output_path"] = output_img_path
         output_data["object_count"] = len(sorted_indices)
         output_data["object_order"] = [i+1 for i in range(len(sorted_indices))] # 1-based index 
+
+        # 6. บันทึก JSON
+        with open("Model/output.json", "w") as f:
+            json.dump(output_data, f, indent=4)
 
         return output_data
 
@@ -117,3 +118,6 @@ def detect_ai(stitched_img_path):
         # 🎯 FIX: คืนค่า Dictionary ล้มเหลว (status=False)
         output_data["message"] = str(e)
         return output_data
+    
+if __name__ == '__main__':
+    detect_ai("Model/stitched/stitched.jpg")

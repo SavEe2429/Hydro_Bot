@@ -1,4 +1,4 @@
-import cv2, os, subprocess, sys, time
+import cv2, os, sys, time
 
 # 🎯 FIX: อ้างอิง Backend ถูกต้อง
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", "Backend"))
@@ -40,8 +40,8 @@ def capture_img():
         # 🟢 อ่านข้อมูล Serial ที่มีทั้งหมดใน Buffer (ไม่บล็อก)
         serial_data = sc.read_all_available().upper().strip()  
         
-        if "WAITINGCOMMAND" in serial_data:
-            print("<- Received 'WAITINGCOMMAND'. Send command and shots_count...")
+        if "WAITING_COMMAND" in serial_data:
+            print("<- Received 'WAITING_COMMAND'. Send command and shots_count...")
             # 🎯 FIX: ส่งคำสั่งที่มีค่าตัวแปร: CAPTURE:10
             sc.send_serial_command(f"CAPTURE:{shots_count}")
             

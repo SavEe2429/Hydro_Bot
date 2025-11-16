@@ -87,7 +87,10 @@ def process_and_detect_ai():
     # 5. อย่าลืมปิดการเชื่อมต่อเมื่อเสร็จ
     sc.close_serial_connection()
 
-    # 6. คืนค่าผลลัพธ์ที่รวม object_order ไว้ด้วย
+    # 6. อัปเดตค่า GLOBAL_JSON
+    load_json_file(isHoming=False)
+
+    # 7. คืนค่าผลลัพธ์ที่รวม object_order ไว้ด้วย
     return {
         "image_url": image_base64_data,
         "object_count": object_count,
@@ -123,10 +126,14 @@ def local_process_detect():
 
 
 @app.route('/loading/loadjson', methods=['POST'])
-def load_json_file():
+def load_json_file(isHoming=True):
     """
     โหลดข้อมูลจาก json file และอัปเดตค่าของ GLOBAL_JSON
     """
+    sc.initialize_serial_connection()
+    if(isHoming):
+        sc.send_serial_command("Homing")
+    
     global GLOBAL_JSON
     jsonfile = read_json("Model/output.json")
     if not jsonfile or jsonfile.get('object_count',0) == 0:
@@ -140,7 +147,7 @@ def load_json_file():
 
         object_centers_dict[obj_id] = {
             'x':obj.get('center_x',0),
-            'y':obj.get('center_y',0)
+            'z':obj.get('center_z',0)
         }
         object_order_list.append(obj_id)
     
@@ -150,52 +157,113 @@ def load_json_file():
         "last_run_time": time.time()
     })
     image_base64_data = image_to_base64(jsonfile['output_path']) 
-    
+
     return jsonify({
         "status":"success",
         "image_url":image_base64_data,
         "object_count":jsonfile['object_count']
     }),200
 
+
 @app.route('/action/water_specific', methods=['POST'])
 def local_water_specific():
     """
     รับคำสั่งจาก Render Backend ให้รดน้ำเฉพาะจุดผ่าน Serial Port
     """
+    global GLOBAL_JSON
+    sc.initialize_serial_connection()
+    max_wait_sec = 60
+    start_time = time.time()
+
     content = request.get_json()
     object_id = content.get('object_id')
     
+    object_centers_dict = GLOBAL_JSON["object_centers"]
+    center_coords = object_centers_dict.get(object_id)  
+    pos_x = center_coords['x']
+    pos_z = center_coords['z']
+    if(pos_z < 250):
+        pos_z -= 100
+    count_space = pos_x / 75 # 75 มาจาก จำนวนรูปภาพหารด้วยขนาดความสูงของรูปภาพ เช่น ถ่ายมา 12 รูป ได้รูปที่รวมกันมีความสูง 900 : 900 / 12 = 75
+    pos_x = pos_x + (count_space * 8.5) # ถ้าได้จำนวนช่องว่างที่หายไปมา ก็เอามาคูณกับ 8.5 // 8.5 มาจาก สูงของรูปภาพ 12 รูปรวมกันแล้วหารด้วย สูงของรูปที่รวม : (640*12)=7680 , 7680/900 : 8.53 
+            
     # 🚨 โค้ดควบคุม Serial Port จะอยู่ที่นี่
-    response = sc.send_serial_command(f"WATER_SPECIFIC:{object_id}")
+    response = sc.send_serial_command(f"WATER_SPECIFIC:{object_id},{pos_x},{pos_z}")
     
-    print(f"Local Device: Serial Command SENT for object ID {object_id}. Response: {response}")
-    
-    if "WATERING_SPECIFIC_COMPLETE" in response.upper():
-        return jsonify({"status": "success", "message": f"Serial command sent for {object_id}"})
-    else:
-        return jsonify({"status": "error", "message": f"Serial command failed for {object_id}: {response}"}), 500
+    # loop timeout
+    try:
+        while (time.time() - start_time) < max_wait_sec:
+            serial_data = sc.read_all_available().upper().strip()
+            if "WATERING_SPECIFIC_COMPLETE" in serial_data:
+                return jsonify({"status": "success", "message": f"Serial command sent for {object_id},{pos_x},{pos_z}"})
+            time.sleep(0.05)
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Serial command failed for {object_id},{pos_x},{pos_z}: {e}"}), 500
+        
 
+    print(f"Local Device: Serial Command SENT for object ID {object_id}. Response: {response}")
 
 @app.route('/action/water_all', methods=['POST'])
 def local_water_all():
     """
     รับคำสั่งจาก Render Backend ให้รดน้ำทั้งหมดตามลำดับ
     """
+    global GLOBAL_JSON
     # 🚨 โค้ดนี้ควรดึงลำดับการรดน้ำล่าสุดจากฐานข้อมูล Cloud (ที่ AI บันทึกไว้)
     #    และทำการวนลูปส่งคำสั่งผ่าน Serial Port
     
     # เนื่องจากเรายังไม่มี DB, ให้ส่งคำสั่ง WATER_ALL ไปที่ ESP32 โดยตรง 
     # และคาดหวังว่า ESP32 จะมี Logic ในการรดน้ำตามลำดับอยู่แล้ว
-    
-    response = sc.send_serial_command("WATER_ALL")
 
-    print(f"Local Device: Serial Command SENT for all objects in sequence. Response: {response}")
-    
-    if "ACK" in response.upper():
-        return jsonify({"status": "success", "message": "All watering commands sent."})
-    else:
-        return jsonify({"status": "error", "message": f"Water All command failed: {response}"}), 500
+    # connecting port
+    sc.initialize_serial_connection()
 
+    object_centers_dict = GLOBAL_JSON["object_centers"]
+    object_order_list = GLOBAL_JSON["object_order"]
+    if not object_order_list:
+        return jsonify({"status": "error" , "message": "No detection data." })
+    print(object_centers_dict)
+    start_time = time.time() # เวลาตอนนี้
+    max_wait_sec = 60 # หมดเวลา
+    list_index = 0
+    sc.send_serial_command("CHECK_WATER_ALL")
+    
+    try:
+        while (time.time() - start_time) < max_wait_sec : 
+            serial_data = sc.read_all_available().upper().strip()
+            
+            # print(object_order_list[-1])
+            center_coords = object_centers_dict.get(object_order_list[list_index]) # ที่ใช้ get เพราะว่าจะดึงผลลัพเป็น Dic
+            if not center_coords :
+                continue
+            pos_x = center_coords['x']
+            pos_z = center_coords['z']
+            if(pos_z < 250):
+                pos_z -= 100
+            count_space = pos_x / 75 # 75 มาจาก จำนวนรูปภาพหารด้วยขนาดความสูงของรูปภาพ เช่น ถ่ายมา 12 รูป ได้รูปที่รวมกันมีความสูง 900 : 900 / 12 = 75
+            pos_x = pos_x + (count_space * 8.5) # ถ้าได้จำนวนช่องว่างที่หายไปมา ก็เอามาคูณกับ 8.5 // 8.5 มาจาก สูงของรูปภาพ 12 รูปรวมกันแล้วหารด้วย สูงของรูปที่รวม : (640*12)=7680 , 7680/900 : 8.53 
+            command = f"WATER_ALL:{object_order_list[list_index]},{pos_x},{pos_z}"
+
+            # (1.1) เมื่อได้รับข้อความนี้ก็จะส่งตำแหน่งที่ต้องเคลื่อนที่ไป
+            if "WAITING_COMMAND" in serial_data:
+                print("<- Recevie WAITING_COMMAND.")
+                sc.send_serial_command(command)
+
+            # (1.2) ให้เมื่อได้รับข้อความนี้ จะส่งคำสั่งเช็คไปที่ esp32 และเมื่อตอบกลับมาก็จะไปทำงาน (1.1)
+            if f"WATERING_{object_order_list[list_index]}_COMPLETE" in serial_data:
+                print(f"<- Recevie WATERING_{object_order_list[list_index]}_COMPLETE.")
+                if list_index + 1 == len(object_order_list):
+                    return jsonify({"status":"success" , "message": "All watering command did send."})
+                sc.send_serial_command("CHECK_WATER_ALL")
+                list_index+=1
+            # print(serial_data)
+            time.sleep(0.05) 
+
+    except Exception as e:
+        return jsonify({"status":"error","message":f"Fatal error during water_all : {e}"}),500
+    
+  
+    
 
 @app.route('/', methods=['GET'])
 def health_check():
