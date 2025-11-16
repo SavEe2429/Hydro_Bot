@@ -20,3 +20,7 @@ npm run dev
 
 3.ติดตั้ง Axios
 npm install axios
+
+
+Model
+-> https://drive.google.com/drive/u/1/folders/1YQE-BHir9Gl6QZ0gyL7sFPAq99uIL9WS
