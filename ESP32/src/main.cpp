@@ -4,6 +4,7 @@
 // Motor pins
 #define Limit_X 18
 #define Limit_Z 4
+#define Relay_Pump 23
 const int A_IN1 = 14, A_IN2 = 12, A_IN3 = 13, A_IN4 = 15; // X
 const int B_IN1 = 27, B_IN2 = 26, B_IN3 = 25, B_IN4 = 33; // Z
 
@@ -13,8 +14,8 @@ const int STEP_SEQ[8][4] = {
 
 const int STEPS_PER_REV = 4096;
 const int STEP_DELAY = 800;
-const float DIST_PER_REV = 15.71;
-const float HOME_OFFSET_MM = 3;
+const float DIST_PER_REV = 15.71; // ความยาวรอบเพลา
+const float HOME_OFFSET_MM = 3;   // ระยะที่ต้องการให้ถอยออกมา
 
 // Motor state
 float stepsToMoveX = 0, stepsToMoveZ = 0;
@@ -113,7 +114,7 @@ void backoffX()
   stopMotor(A_IN1, A_IN2, A_IN3, A_IN4);
   attachInterrupt(digitalPinToInterrupt(Limit_X), LimitInteruptX, FALLING);
   stepsToMoveX = 0;
-  currentPosX = 0;
+  // currentPosX = 0;
 }
 
 void backoffZ()
@@ -128,7 +129,7 @@ void backoffZ()
   stopMotor(B_IN1, B_IN2, B_IN3, B_IN4);
   attachInterrupt(digitalPinToInterrupt(Limit_Z), LimitInteruptZ, FALLING);
   stepsToMoveZ = 0;
-  currentPosZ = 0;
+  // currentPosZ = 0;
 }
 bool isdohoming = false;
 // ================= Homing Function =================
@@ -191,6 +192,10 @@ int id;
 String incomingCommand = "";
 String currentCommand = "";
 
+// Relay
+unsigned long startTime = 0;
+const long duration = 3000; // 3000 มิลลิวินาที = 3 วินาที
+bool pump_active = false;   // สถานะเริ่มต้น
 // ----------------------------------------------------
 // 🎯 NON-BLOCKING SCAN/MOVE LOGIC
 // ----------------------------------------------------
@@ -294,19 +299,38 @@ void handleScan()
     break;
 
   case WATER_COMPLETE:
-    if (currentCommand == "WATER_SPECIFIC")
+    if (!pump_active)
     {
-      Serial.println("WATERING_SPECIFIC_COMPLETE");
-      Serial.flush();
+      // ✅ FIX 1: ยกเลิก Interrupt ก่อนเปิดรีเลย์
+      detachInterrupt(digitalPinToInterrupt(Limit_X));
+      detachInterrupt(digitalPinToInterrupt(Limit_Z));
+      startTime = millis();           // บันทึกเวลาที่เริ่มทำงาน
+      digitalWrite(Relay_Pump, LOW); // เปิดรีเลย์
+      pump_active = true;             // ตั้งค่าสถานะว่าปั๊มกำลังทำงาน
     }
-    if (currentCommand == "WATER_ALL")
+
+    // ตรวจสอบว่าถึงเวลาปิดหรือยัง
+    if (pump_active && (millis() - startTime >= duration))
     {
-      Serial.print("\nWATERING_"); // ส่งการตอบกลับ
-      Serial.print(id);            // ส่งการตอบกลับ
-      Serial.println("_COMPLETE"); // ส่งการตอบกลับ
-      Serial.flush();
+      digitalWrite(Relay_Pump, HIGH); // ปิดรีเลย์
+      // ✅ FIX 2: เปิดใช้งาน Interrupt อีกครั้งหลังจากปิดรีเลย์
+      pump_active = false; // ตั้งค่าสถานะว่าปั๊มหยุดแล้ว
+      if (currentCommand == "WATER_SPECIFIC")
+      {
+        Serial.println("WATERING_SPECIFIC_COMPLETE");
+        Serial.flush();
+      }
+      if (currentCommand == "WATER_ALL")
+      {
+        Serial.print("\nWATERING_"); // ส่งการตอบกลับ
+        Serial.print(id);            // ส่งการตอบกลับ
+        Serial.println("_COMPLETE"); // ส่งการตอบกลับ
+        Serial.flush();
+      }
+      currentState = IDLE;
+      attachInterrupt(digitalPinToInterrupt(Limit_X), LimitInteruptX, FALLING);
+      attachInterrupt(digitalPinToInterrupt(Limit_Z), LimitInteruptZ, FALLING);
     }
-    currentState = IDLE;
     break;
   }
 }
@@ -322,6 +346,7 @@ void setup()
 
   pinMode(Limit_X, INPUT_PULLUP);
   pinMode(Limit_Z, INPUT_PULLUP);
+  pinMode(Relay_Pump, OUTPUT);
 
   attachInterrupt(digitalPinToInterrupt(Limit_X), LimitInteruptX, FALLING);
   attachInterrupt(digitalPinToInterrupt(Limit_Z), LimitInteruptZ, FALLING);
@@ -333,6 +358,7 @@ void setup()
   pinMode(B_IN2, OUTPUT);
   pinMode(B_IN3, OUTPUT);
   pinMode(B_IN4, OUTPUT);
+  digitalWrite(Relay_Pump, HIGH);
   // homing = false;
   Serial.println("Ready.");
 }
@@ -384,7 +410,8 @@ void processCommand(String command)
 {
   command.toUpperCase(); // ⬅️ FIX: ใช้ ToUpperCase() เพื่อความเข้ากันได้กับ Python
 
-  if (command == "HOMING"){
+  if (command == "HOMING")
+  {
     Serial.println("");
     Serial.flush();
     currentState = HOMING;
@@ -441,8 +468,8 @@ void processCommand(String command)
     currentCommand = "WATER_SPECIFIC";
     // find symbol index from command
     int colonIndex = command.indexOf(":");
-    String valueStr = command.substring(colonIndex + 1);             // 3,123,456
-    
+    String valueStr = command.substring(colonIndex + 1); // 3,123,456
+
     int firstComma = valueStr.indexOf(",");
     int SecComma = valueStr.indexOf(",", firstComma + 1);
     if (colonIndex == -1 || firstComma == -1 || SecComma == -1)
@@ -478,7 +505,7 @@ void processCommand(String command)
     currentCommand = "WATER_ALL";
     // find symbol index from command
     int colonIndex = command.indexOf(":");
-    String valueStr = command.substring(colonIndex + 1);             // 3,123,456
+    String valueStr = command.substring(colonIndex + 1); // 3,123,456
 
     int firstComma = valueStr.indexOf(",");
     int SecComma = valueStr.indexOf(",", firstComma + 1);

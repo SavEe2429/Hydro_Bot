@@ -194,6 +194,7 @@ def local_water_specific():
     try:
         while (time.time() - start_time) < max_wait_sec:
             serial_data = sc.read_all_available().upper().strip()
+            # print(serial_data)
             if "WATERING_SPECIFIC_COMPLETE" in serial_data:
                 return jsonify({"status": "success", "message": f"Serial command sent for {object_id},{pos_x},{pos_z}"})
             time.sleep(0.05)
