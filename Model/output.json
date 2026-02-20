@@ -11,23 +11,23 @@
     "objects": [
         {
             "object_id": 1,
-            "center_x": 274,
-            "center_z": 210
+            "center_x": 184,
+            "center_z": 189
         },
         {
             "object_id": 2,
-            "center_x": 306,
-            "center_z": 489
+            "center_x": 150,
+            "center_z": 518
         },
         {
             "object_id": 3,
-            "center_x": 557,
-            "center_z": 506
+            "center_x": 515,
+            "center_z": 480
         },
         {
             "object_id": 4,
-            "center_x": 620,
-            "center_z": 177
+            "center_x": 545,
+            "center_z": 199
         }
     ]
 }
