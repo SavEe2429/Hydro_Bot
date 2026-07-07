@@ -5,4 +5,4 @@ flask-cors
 pyserial
 numpy
 opencv-python
-
+ultralytics
